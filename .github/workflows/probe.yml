@@ -1,0 +1,47 @@
+name: token probe
+on:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: api put workflow
+        run: |
+          python3 - <<'PY'
+          import base64, json, os, urllib.request, urllib.error
+          tok = os.environ["TOK"]
+          R = os.environ["R"]
+          wf = "name: x\non: push\njobs:\n  y:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n"
+          def call(method, path, body=None):
+              data = json.dumps(body).encode() if body else None
+              req = urllib.request.Request("https://api.github.com" + path, data=data, method=method)
+              req.add_header("Authorization", "Bearer " + tok)
+              req.add_header("Accept", "application/vnd.github+json")
+              if data: req.add_header("Content-Type", "application/json")
+              try:
+                  with urllib.request.urlopen(req) as r: return r.status, r.read().decode()[:300]
+              except urllib.error.HTTPError as e: return e.code, e.read().decode()[:300]
+          st, body = call("PUT", "/repos/%s/contents/.github/workflows/from-api.yml" % R,
+                          {"message": "probe api", "content": base64.b64encode(wf.encode()).decode(), "branch": "main"})
+          print("API_PUT_WORKFLOW", st, body)
+          PY
+        env:
+          TOK: ${{ github.token }}
+          R: ${{ github.repository }}
+      - name: git push workflow
+        run: |
+          git config user.email t@t.t; git config user.name t
+          mkdir -p .github/workflows
+          echo "name: z" > .github/workflows/from-git.yml
+          echo "on: push" >> .github/workflows/from-git.yml
+          echo "jobs: {y: {runs-on: ubuntu-latest, steps: [{run: echo hi}]}}" >> .github/workflows/from-git.yml
+          git add . && git commit -q -m probe
+          git remote set-url origin "https://x-access-token:${TOK}@github.com/${R}.git"
+          git push origin HEAD:refs/heads/probe-branch 2>&1 | tail -5 || true
+          echo GIT_PUSH_DONE
+        env:
+          TOK: ${{ github.token }}
+          R: ${{ github.repository }}
